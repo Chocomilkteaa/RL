@@ -4,24 +4,24 @@ import cv2
 import numpy as np
 import gymnasium as gym
 
-class PolicyAndValueIteration:
+class QLearning:
     def __init__(self, env, size,
-                 max_iter=10**6, tol=10**-3, discount=0.99,
+                 max_iter=10**4, tol=10**-3, 
+                 explore_rate=0.99, learning_rate=0.5, discount_rate=0.99, 
                  test_iter=10, result_path='./', result_name='video'):
         self.env = env
         self.size = size
         self.number_of_state = self.env.observation_space.n
         self.number_of_action = self.env.action_space.n
 
-        self.values = np.zeros(self.number_of_state)
-        self.policies = np.array([self.env.action_space.sample() for _ in range(self.number_of_state)])
-
-        self.rewards = np.zeros((self.number_of_state, self.number_of_action))
-        self.transitions = np.zeros((self.number_of_state, self.number_of_action, self.number_of_state))
+        self.q_table = np.zeros((self.number_of_state, self.number_of_action))
 
         self.max_iter = max_iter
         self.tol = tol
-        self.discount = discount
+
+        self.explore_rate = explore_rate
+        self.learning_rate = learning_rate
+        self.discount_rate = discount_rate
 
         self.test_iter = test_iter
 
@@ -31,24 +31,29 @@ class PolicyAndValueIteration:
         
         self.result_name = result_name
 
-    def getRewardsAndTransitions(self):
-        for state in range(self.number_of_state):
-            for action in range(self.number_of_action):
-                for transition_info in self.env.unwrapped.P[state][action]:
-                    transition, next_state, reward, done = transition_info
-                    self.rewards[state, action] = reward
-                    self.transitions[state, action, next_state] = transition
-    
-    def optimizePolicy(self):
+    def train(self):
         for i in range(self.max_iter):
-            values_old = self.values.copy()
+            state, info = self.env.reset()
 
-            self.values = np.max(self.rewards + np.matmul(self.transitions, self.discount * values_old), axis=1)
+            self.explore_rate *= 0.9
 
-            if np.max(np.abs(self.values - values_old)) < self.tol:
-                break
+            while True:
+                random_num = np.random.uniform(0,1)
 
-        self.policies = np.argmax(self.rewards + np.matmul(self.transitions, self.discount * self.values), axis=1)
+                if random_num > self.explore_rate:
+                    action = np.argmax(self.q_table[state, :])
+                else:
+                    action = self.env.action_space.sample()
+
+                next_state, reward, terminated, truncated, info = self.env.step(action)
+
+                self.q_table[state, action] = self.q_table[state, action] + \
+                    self.learning_rate * (reward + self.discount_rate * np.max(self.q_table[next_state, :]) - self.q_table[state, action])
+                
+                if terminated or truncated:
+                    break
+
+                state = next_state
 
     def test(self):
         max_trajectory_reward = -np.inf
@@ -60,7 +65,7 @@ class PolicyAndValueIteration:
             trajectory_length = 0
 
             while True:
-                action = self.policies[state]
+                action = np.argmax(self.q_table[state, :])
                 next_state, reward, terminated, truncated, info = self.env.step(action)
 
                 trajectory_reward += reward
@@ -86,7 +91,7 @@ class PolicyAndValueIteration:
         writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), 2, self.size)
 
         while True:
-            action = self.policies[state]
+            action = np.argmax(self.q_table[state, :])
             next_state, reward, terminated, truncated, info = self.env.step(action)
             state = next_state
 
@@ -97,24 +102,8 @@ class PolicyAndValueIteration:
 
                 break
 
-    def value_iteration(self):
-        self.getRewardsAndTransitions()
-
-        self.optimizePolicy()
-
-        self.test()
-
-    def policy_iteration(self):
-        self.getRewardsAndTransitions()
-
-        for i in range(self.test_iter):
-            policies_old = self.policies.copy()
-
-            self.optimizePolicy()
-
-            if np.all(np.equal(self.policies, policies_old)):
-                break
-
+    def qlearning(self):
+        self.train()
         self.test()
 
 if __name__ == '__main__':
@@ -122,10 +111,5 @@ if __name__ == '__main__':
     observation, info = env.reset()
     size = (env.render().shape[1], env.render().shape[0])
 
-    print('Value Iteration:')
-    vi = PolicyAndValueIteration(env, size, result_path='./Result/', result_name='vi')
-    vi.value_iteration()
-
-    print('Policy Iteration:')
-    pi = PolicyAndValueIteration(env, size, result_path='./Result/', result_name='pi')
-    pi.policy_iteration()
+    ql = QLearning(env, size, result_path='./Result/', result_name='vi')
+    ql.qlearning()
