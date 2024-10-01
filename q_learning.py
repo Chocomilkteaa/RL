@@ -31,6 +31,9 @@ class QLearning:
         
         self.result_name = result_name
 
+    def getAction(self, state):
+        return np.argmax(self.q_table[state])
+
     def train(self):
         for i in range(self.max_iter):
             state, info = self.env.reset()
@@ -41,7 +44,7 @@ class QLearning:
                 random_num = np.random.uniform(0,1)
 
                 if random_num > self.explore_rate:
-                    action = np.argmax(self.q_table[state, :])
+                    action = self.getAction(state)
                 else:
                     action = self.env.action_space.sample()
 
@@ -56,8 +59,6 @@ class QLearning:
                 state = next_state
 
     def test(self):
-        max_trajectory_reward = -np.inf
-        max_reward_iter = 0
         trajectory_rewards = []
         for i in range(self.test_iter):
             state, info = self.env.reset(seed=i)
@@ -65,7 +66,7 @@ class QLearning:
             trajectory_length = 0
 
             while True:
-                action = np.argmax(self.q_table[state, :])
+                action = self.getAction(state)
                 next_state, reward, terminated, truncated, info = self.env.step(action)
 
                 trajectory_reward += reward
@@ -78,20 +79,16 @@ class QLearning:
 
                     trajectory_rewards.append(trajectory_reward)
 
-                    if trajectory_reward > max_trajectory_reward:
-                        max_trajectory_reward = trajectory_reward
-                        max_reward_iter = i
-
                     break
 
         print(f'Reward Mean: {np.mean(trajectory_rewards)}, Std: {np.std(trajectory_rewards)}')
         
-        state, info = self.env.reset(seed=max_reward_iter)
+        state, info = self.env.reset(seed=np.argmax(trajectory_rewards))
 
         writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), 2, self.size)
 
         while True:
-            action = np.argmax(self.q_table[state, :])
+            action = self.getAction(state)
             next_state, reward, terminated, truncated, info = self.env.step(action)
             state = next_state
 
@@ -104,9 +101,12 @@ class QLearning:
 
     def qlearning(self):
         self.train()
+
         self.test()
 
 if __name__ == '__main__':
+    np.random.seed(0)
+    
     env = gym.make("Taxi-v3", render_mode='rgb_array')
     observation, info = env.reset()
     size = (env.render().shape[1], env.render().shape[0])
