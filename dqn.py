@@ -1,22 +1,36 @@
 import os
 import cv2
 
-from collections import deque
+from collections import namedtuple, deque
 import random
 import numpy as np
 import gymnasium as gym
+from gymnasium.spaces import Discrete, Box
 
 import torch
 
+Transition = namedtuple('Transition',
+                        ('state', 'action', 'reward', 'next_state', 'n_done'))
+
 class ReplayMemory(object):
-    def __init__(self, capacity):
+    def __init__(self, capacity, device):
         self.memory = deque([], maxlen=capacity)
-    def push(self, state, action, reward, next_state):
-        self.memory.append((state, action, reward, next_state))
+        self.device = device
+
+    def push(self, state, action, reward, next_state, n_done):
+        transition = Transition(torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0),
+                                torch.tensor([[action]], dtype=torch.int64, device=self.device),
+                                torch.tensor([reward], dtype=torch.float32, device=self.device),
+                                torch.tensor(next_state, dtype=torch.float32, device=self.device).unsqueeze(0),
+                                torch.tensor([n_done], dtype=torch.bool, device=self.device))
+        self.memory.append(transition)
+
     def sample(self, batch_size):
             return random.sample(self.memory, batch_size)
+    
     def __len__(self):
         return len(self.memory)
+    
     def reset(self):
         self.memory.clear()
 
@@ -34,7 +48,7 @@ class Model(torch.nn.Module):
     
 class DQN(object):
     def __init__(self, env, size, number_of_state, number_of_action, 
-                hidden_size=128, batch_size=128, memory_size=10000,
+                batch_size=128, hidden_size=128, memory_size=10000,
                 max_epsisode=1000, explore_rate=0.99, learning_rate=1e-4, update_rate=0.005,  discount_rate=0.99,
                 test_iter=10, result_path='./Result', result_name='video'):
         self.env = env
@@ -42,9 +56,7 @@ class DQN(object):
         self.number_of_state = number_of_state
         self.number_of_action = number_of_action
 
-        self.hidden_size = hidden_size
         self.batch_size = batch_size
-        self.memory = memory_size
 
         self.max_epsisode = max_epsisode
         self.explore_rate = explore_rate
@@ -62,10 +74,10 @@ class DQN(object):
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        self.memory = ReplayMemory(10000)
+        self.memory = ReplayMemory(memory_size, self.device)
 
-        self.policy_net = DQN(number_of_state, number_of_action).to(self.device)
-        self.target_net = DQN(number_of_state, number_of_action).to(self.device)
+        self.policy_net = Model(number_of_state, number_of_action, hidden_size).to(self.device)
+        self.target_net = Model(number_of_state, number_of_action, hidden_size).to(self.device)
 
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
@@ -75,46 +87,36 @@ class DQN(object):
     def sampleTransition(self):
         transitions = self.memory.sample(self.batch_size)
 
-        state_batch = []
-        action_batch = []
-        reward_batch = []
-        n_done_batch = []
-        n_done_next_state_batch = []
+        batch = Transition(*zip(*transitions))
 
-        for state, action, reward, next_state in transitions:
-            state_batch.append(torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0))
-            reward_batch.append(torch.tensor([reward], dtype=torch.float32, device=self.device))
-            n_done_batch.append((next_state is not None))
-            if next_state is not None:
-                n_done_next_state_batch.append(torch.tensor(next_state, dtype=torch.float32, device=self.device).unsqueeze(0))
+        state_batch = torch.cat(batch.state)
+        action_batch = torch.cat(batch.action)
+        reward_batch = torch.cat(batch.reward)
+        next_state_batch = torch.cat(batch.next_state)
+        n_done_batch = torch.cat(batch.n_done)
 
-        state_batch = torch.cat(state_batch)
-        reward_batch = torch.cat(reward_batch)
-        n_done_batch = torch.tensor(n_done_batch, dtype=torch.bool)
-        n_done_next_state_batch = torch.cat(n_done_next_state_batch)
-
-        return state_batch, reward_batch, n_done_batch, n_done_next_state_batch
+        return state_batch, action_batch, reward_batch, next_state_batch, n_done_batch
     
     def updateTarget(self):
         target_net_state_dict = self.target_net.state_dict()
         policy_net_state_dict = self.policy_net.state_dict()
         for key in policy_net_state_dict:
-            target_net_state_dict[key] = policy_net_state_dict[key]*self.update_rate + target_net_state_dict[key]*(1-self.update_rate)
+            target_net_state_dict[key] = policy_net_state_dict[key] * self.update_rate + target_net_state_dict[key] * (1 - self.update_rate)
         self.target_net.load_state_dict(target_net_state_dict)
 
     def optimizePolicy(self):
         if len(self.memory) < self.batch_size:
             return
 
-        state_batch, reward_batch, n_done_batch, n_done_next_state_batch = self.sampleTransition()
+        state_batch, action_batch, reward_batch, next_state_batch, n_done_batch = self.sampleTransition()
 
-        state_action_values = self.policy_net(state_batch).max(1).values
+        state_action_values = self.policy_net(state_batch).gather(1, action_batch)
 
         next_state_values = torch.zeros(self.batch_size, device=self.device)
         with torch.no_grad():
-            next_state_values[n_done_batch] = self.target_net(n_done_next_state_batch).max(1).values
+            next_state_values[n_done_batch] = self.target_net(next_state_batch[n_done_batch]).max(1).values
 
-        expected_state_action_values = (next_state_values * self.discount_rate) + reward_batch
+        expected_state_action_values = ((next_state_values * self.discount_rate) + reward_batch).unsqueeze(1)
 
         loss = self.criterion(state_action_values, expected_state_action_values)
 
@@ -124,30 +126,32 @@ class DQN(object):
 
         self.updateTarget()
 
-    def dqn(self):
+    def getAction(self, state):
+        with torch.no_grad():
+            action = self.policy_net(torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)).max(1).indices.item()
+        return action
+
+    def train(self):
         for episode in range(self.max_epsisode):
             state, info = env.reset(seed = episode)
 
-            explore_rate *= 0.999
+            self.explore_rate *= 0.999
 
             rewards = 0
 
             while True:
                 random_num = np.random.uniform(0,1)
 
-                if random_num > explore_rate:
-                    action = self.policy_net(torch.tensor(state, dtype=torch.float32, device='cuda').unsqueeze(0)).max(1).indices.item()
+                if random_num > self.explore_rate:
+                    action = self.getAction(state)
                 else:
                     action = env.action_space.sample()
 
-                next_state, reward, terminated, truncated, done = env.step(action)
+                next_state, reward, terminated, truncated, info = env.step(action)
 
                 rewards += reward
 
-                if terminated:
-                    next_state = None
-
-                self.memory.push(state, action, reward, next_state)
+                self.memory.push(state, action, reward, next_state, not (terminated or truncated))
 
                 self.optimizePolicy()
 
@@ -157,6 +161,71 @@ class DQN(object):
 
                 state = next_state
 
+    def test(self):
+        trajectory_rewards = []
+        for i in range(self.test_iter):
+            state, info = self.env.reset(seed=i)
+            trajectory_reward = 0
+            trajectory_length = 0
+
+            while True:
+                action = self.getAction(state)
+                next_state, reward, terminated, truncated, info = self.env.step(action)
+
+                trajectory_reward += reward
+                trajectory_length += 1
+
+                state = next_state
+
+                if terminated or truncated:
+                    print(f'Iteration {i}: length:{trajectory_length}, reward: {trajectory_reward}')
+
+                    trajectory_rewards.append(trajectory_reward)
+
+                    break
+
+        print(f'Reward Mean: {np.mean(trajectory_rewards)}, Std: {np.std(trajectory_rewards)}')
+        
+        state, info = self.env.reset(seed=int(np.argmax(trajectory_rewards)))
+
+        writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), 30, self.size)
+
+        while True:
+            action = self.getAction(state)
+            next_state, reward, terminated, truncated, info = self.env.step(action)
+            state = next_state
+
+            writer.write(self.env.render())
+
+            if terminated or truncated:
+                writer.release()
+
+                break
+
+    def dqn(self):
+        self.train()
+
+        self.test()
+
+def getEnvInfo(env):
+    observation, info = env.reset()
+    frame = env.render()
+    size = (frame.shape[1], frame.shape[0])
+    if isinstance(env.observation_space, Box):
+        number_of_state = env.observation_space.shape[0]
+    elif isinstance(env.observation_space, Discrete):
+        number_of_state = env.observation_space.n
+    else:
+        print('this script only works for Box / Discrete observation spaces.')
+        exit()
+    if isinstance(env.action_space, Discrete):
+        number_of_action = env.action_space.n
+    else:
+        print('this script only works for Discrete action spaces.')
+        exit()
+
+    return size, number_of_state, number_of_action
+
 
 if __name__ == '__main__':
     torch.manual_seed(0)
@@ -164,11 +233,8 @@ if __name__ == '__main__':
     random.seed(0)
 
     env = gym.make("CartPole-v1", render_mode='rgb_array')
-    observation, info = env.reset()
-    frame = env.render()
-    size = (frame.shape[1], frame.shape[0])
-    number_of_state = env.observation_space.shape[0]
-    number_of_action = env.action_space.n
+    
+    size, number_of_state, number_of_action = getEnvInfo(env)
 
-    ql = DQN(env, size, number_of_state, number_of_action,  result_path='./Result/', result_name='vi')
+    ql = DQN(env, size, number_of_state, number_of_action, batch_size=64,  result_path='./Result/', result_name='dqn')
     ql.dqn()

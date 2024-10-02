@@ -3,15 +3,16 @@ import cv2
 
 import numpy as np
 import gymnasium as gym
+from gymnasium.spaces import Discrete, Box
 
 class PolicyAndValueIteration:
-    def __init__(self, env, size,
+    def __init__(self, env, size, number_of_state, number_of_action,
                  max_iter=10**6, tol=10**-3, discount_rate=0.99,
                  test_iter=10, result_path='./', result_name='video'):
         self.env = env
         self.size = size
-        self.number_of_state = self.env.observation_space.n
-        self.number_of_action = self.env.action_space.n
+        self.number_of_state = number_of_state
+        self.number_of_action = number_of_action
 
         self.values = np.zeros(self.number_of_state)
         self.policies = np.array([self.env.action_space.sample() for _ in range(self.number_of_state)])
@@ -114,17 +115,36 @@ class PolicyAndValueIteration:
 
         self.test()
 
+def getEnvInfo(env):
+    observation, info = env.reset()
+    frame = env.render()
+    size = (frame.shape[1], frame.shape[0])
+    if isinstance(env.observation_space, Box):
+        number_of_state = env.observation_space.shape[0]
+    elif isinstance(env.observation_space, Discrete):
+        number_of_state = env.observation_space.n
+    else:
+        print('this script only works for Box / Discrete observation spaces.')
+        exit()
+    if isinstance(env.action_space, Discrete):
+        number_of_action = env.action_space.n
+    else:
+        print('this script only works for Discrete action spaces.')
+        exit()
+
+    return size, number_of_state, number_of_action
+
 if __name__ == '__main__':
     np.random.seed(0)
     
     env = gym.make("Taxi-v3", render_mode='rgb_array')
-    observation, info = env.reset()
-    size = (env.render().shape[1], env.render().shape[0])
+    
+    size, number_of_state, number_of_action = getEnvInfo(env)
 
     print('Value Iteration:')
-    vi = PolicyAndValueIteration(env, size, result_path='./Result/', result_name='vi')
+    vi = PolicyAndValueIteration(env, size, number_of_state, number_of_action, result_path='./Result/', result_name='vi')
     vi.value_iteration()
 
     print('Policy Iteration:')
-    pi = PolicyAndValueIteration(env, size, result_path='./Result/', result_name='pi')
+    pi = PolicyAndValueIteration(env, size, number_of_state, number_of_action, result_path='./Result/', result_name='pi')
     pi.policy_iteration()
