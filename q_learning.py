@@ -9,7 +9,7 @@ class QLearning:
     def __init__(self, env, size, number_of_state, number_of_action,
                  max_iter=10**4, tol=10**-3, 
                  explore_rate=0.99, learning_rate=0.5, discount_rate=0.99, 
-                 test_iter=10, result_path='./', result_name='video'):
+                 test_iter=10, result_path='./', result_name='video', frame_rate=30):
         self.env = env
         self.size = size
         self.number_of_state = number_of_state
@@ -31,6 +31,8 @@ class QLearning:
             os.makedirs(self.result_path)
         
         self.result_name = result_name
+
+        self.frame_rate = frame_rate
 
     def getAction(self, state):
         return np.argmax(self.q_table[state])
@@ -86,7 +88,7 @@ class QLearning:
         
         state, info = self.env.reset(seed=np.argmax(trajectory_rewards))
 
-        writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), 2, self.size)
+        writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), self.frame_rate, self.size)
 
         while True:
             action = self.getAction(state)
@@ -131,5 +133,5 @@ if __name__ == '__main__':
     
     size, number_of_state, number_of_action = getEnvInfo(env)
 
-    ql = QLearning(env, size, number_of_state, number_of_action, result_path='./Result/', result_name='vi')
-    ql.qlearning()
+    alg = QLearning(env, size, number_of_state, number_of_action, result_path='./Result/', result_name='ql', frame_rate=2)
+    alg.qlearning()

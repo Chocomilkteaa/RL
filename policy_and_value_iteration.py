@@ -8,7 +8,7 @@ from gymnasium.spaces import Discrete, Box
 class PolicyAndValueIteration:
     def __init__(self, env, size, number_of_state, number_of_action,
                  max_iter=10**6, tol=10**-3, discount_rate=0.99,
-                 test_iter=10, result_path='./', result_name='video'):
+                 test_iter=10, result_path='./', result_name='video', frame_rate=30):
         self.env = env
         self.size = size
         self.number_of_state = number_of_state
@@ -31,6 +31,8 @@ class PolicyAndValueIteration:
             os.makedirs(self.result_path)
         
         self.result_name = result_name
+
+        self.frame_rate = frame_rate
 
     def getRewardsAndTransitions(self):
         for state in range(self.number_of_state):
@@ -81,7 +83,7 @@ class PolicyAndValueIteration:
         
         state, info = self.env.reset(seed=np.argmax(trajectory_rewards))
 
-        writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), 2, self.size)
+        writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), self.frame_rate, self.size)
 
         while True:
             action = self.getAction(state)
@@ -142,9 +144,9 @@ if __name__ == '__main__':
     size, number_of_state, number_of_action = getEnvInfo(env)
 
     print('Value Iteration:')
-    vi = PolicyAndValueIteration(env, size, number_of_state, number_of_action, result_path='./Result/', result_name='vi')
-    vi.value_iteration()
+    alg = PolicyAndValueIteration(env, size, number_of_state, number_of_action, result_path='./Result/', result_name='vi', frame_rate=2)
+    alg.value_iteration()
 
     print('Policy Iteration:')
-    pi = PolicyAndValueIteration(env, size, number_of_state, number_of_action, result_path='./Result/', result_name='pi')
-    pi.policy_iteration()
+    alg = PolicyAndValueIteration(env, size, number_of_state, number_of_action, result_path='./Result/', result_name='pi', frame_rate=2)
+    alg.policy_iteration()

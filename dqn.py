@@ -50,7 +50,7 @@ class DQN(object):
     def __init__(self, env, size, number_of_state, number_of_action, 
                 batch_size=128, hidden_size=128, memory_size=10000,
                 max_epsisode=1000, explore_rate=0.99, learning_rate=1e-4, update_rate=0.005,  discount_rate=0.99,
-                test_iter=10, result_path='./Result', result_name='video'):
+                test_iter=10, result_path='./Result', result_name='video', frame_rate=30):
         self.env = env
         self.size = size
         self.number_of_state = number_of_state
@@ -71,6 +71,8 @@ class DQN(object):
             os.makedirs(self.result_path)
         
         self.result_name = result_name
+
+        self.frame_rate = frame_rate
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -188,7 +190,7 @@ class DQN(object):
         
         state, info = self.env.reset(seed=int(np.argmax(trajectory_rewards)))
 
-        writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), 30, self.size)
+        writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), self.frame_rate, self.size)
 
         while True:
             action = self.getAction(state)
@@ -236,5 +238,5 @@ if __name__ == '__main__':
     
     size, number_of_state, number_of_action = getEnvInfo(env)
 
-    ql = DQN(env, size, number_of_state, number_of_action, batch_size=64,  result_path='./Result/', result_name='dqn')
-    ql.dqn()
+    alg = DQN(env, size, number_of_state, number_of_action, batch_size=64,  result_path='./Result/', result_name='dqn')
+    alg.dqn()
