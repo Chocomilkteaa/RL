@@ -9,9 +9,12 @@ from gymnasium.spaces import Discrete, Box
 
 import torch
 
-class Policy(torch.nn.Module):
+Transition = namedtuple('Transition',
+                        ['state', 'log_prob', 'reward', 'next_state'])
+
+class Actor(torch.nn.Module):
     def __init__(self, number_of_state, number_of_action, hidden_size, device):
-        super(Policy, self).__init__()
+        super(Actor, self).__init__()
         self.layer1 = torch.nn.Linear(number_of_state, hidden_size)
         self.layer2 = torch.nn.Linear(hidden_size, hidden_size)
         self.layer3 = torch.nn.Linear(hidden_size, number_of_action)
@@ -33,18 +36,31 @@ class Policy(torch.nn.Module):
 
         return action.item(), dist.log_prob(action)
     
-class Reinforce(object):
+class Critic(torch.nn.Module):
+    def __init__(self, number_of_state, hidden_size):
+        super(Critic, self).__init__()
+        self.layer1 = torch.nn.Linear(number_of_state, hidden_size)
+        self.layer2 = torch.nn.Linear(hidden_size, hidden_size)
+        self.layer3 = torch.nn.Linear(hidden_size, 1)
+
+    def forward(self, x):
+        x = torch.nn.functional.relu(self.layer1(x))
+        x = torch.nn.functional.relu(self.layer2(x))
+        x = self.layer3(x)
+        return x
+    
+class ActorCritic(object):
     def __init__(self, env, size, number_of_state, number_of_action, 
-                hidden_size=128, max_epsisode=1000, learning_rate=1e-4, discount_rate=0.99,
+                hidden_size=128, max_epsisode=1000, actor_learning_rate=1e-4, critic_learning_rate=1e-4, discount_rate=0.99,
                 target_score=500, test_iter=10, result_path='./Result', result_name='video', frame_rate=30):
-        
         self.env = env
         self.size = size
         self.number_of_state = number_of_state
         self.number_of_action = number_of_action
 
         self.max_epsisode = max_epsisode
-        self.learning_rate = learning_rate
+        self.actor_learning_rate = actor_learning_rate
+        self.critic_learning_rate = critic_learning_rate
         self.discount_rate = discount_rate
 
         self.target_score = target_score
@@ -61,29 +77,33 @@ class Reinforce(object):
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        self.policy_net = Policy(number_of_state, number_of_action, hidden_size, self.device).to(self.device)
+        self.actor_net = Actor(number_of_state, number_of_action, hidden_size, self.device).to(self.device)
+        self.critic_net = Critic(number_of_state, hidden_size).to(self.device)
 
-        self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
+        self.actor_optimizer = torch.optim.Adam(self.actor_net.parameters(), lr=self.actor_learning_rate)
+        self.critic_optimizer = torch.optim.Adam(self.critic_net.parameters(), lr=self.critic_learning_rate)
 
         self.eps = np.finfo(np.float32).eps.item()
 
-    def optimizePolicy(self, params):
-        R = 0
-        returns = deque()
-        for r in reversed(params['rewards']):
-            R = r + R * self.discount_rate
-            returns.appendleft(R)
-        returns = torch.tensor(returns, dtype=torch.float32, device=self.device)
-        returns = (returns - returns.mean()) / (returns.std() + self.eps)
+    def optimizePolicy(self, transition):
+        value = self.critic_net.forward(transition.state)
+        next_value = self.critic_net.forward(transition.next_state)
 
-        loss = torch.cat([-a * b for a, b in zip(params['log_probs'], returns)]).sum()
+        advantage = transition.reward + 0.99 * next_value - value
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        actor_loss = -transition.log_prob * advantage.detach()
+        critic_loss = torch.square(advantage)
+
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
 
     def getAction(self, state):
-        return self.policy_net.getActionAndProb(state)
+        return self.actor_net.getActionAndProb(state)
 
     def train(self):
         average_trajectory_reward = deque(maxlen=100)
@@ -91,21 +111,24 @@ class Reinforce(object):
         for episode in range(self.max_epsisode):
             state, info = self.env.reset(seed = episode)
 
-            rewards = []
-            log_probs = []
+            rewards = 0
 
             while True:
                 action, log_prob = self.getAction(state)
 
-                log_probs.append(log_prob)
-
                 next_state, reward, terminated, truncated, info = env.step(action)
 
-                rewards.append(reward)
+                self.optimizePolicy(
+                    Transition(torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0),
+                    log_prob, 
+                    torch.tensor([[reward]], dtype=torch.float32, device=self.device), 
+                    torch.tensor(next_state, dtype=torch.float32, device=self.device).unsqueeze(0)))
+
+                rewards += reward
 
                 if terminated or truncated:
-                    print(f'Episode: {episode} ends with reward {sum(rewards)}')
-                    average_trajectory_reward.append(sum(rewards))
+                    print(f'Episode: {episode} ends with reward {rewards}')
+                    average_trajectory_reward.append(rewards)
                     break
 
                 state = next_state
@@ -113,10 +136,6 @@ class Reinforce(object):
             if np.mean(average_trajectory_reward) >= self.target_score:
                 print(f'solved with {episode} epochs')
                 break
-
-            params = {'rewards': rewards, 'log_probs': log_probs}
-
-            self.optimizePolicy(params)
 
     def test(self):
         trajectory_rewards = []
@@ -159,10 +178,11 @@ class Reinforce(object):
 
                 break
 
-    def reinforce(self):
+    def actor_critic(self):
         self.train()
 
-        self.test()
+        self.test()        
+
 
 def getEnvInfo(env):
     observation, info = env.reset()
@@ -192,7 +212,7 @@ if __name__ == '__main__':
     
     size, number_of_state, number_of_action = getEnvInfo(env)
 
-    alg = Reinforce(env, size, number_of_state, number_of_action, 
-                    learning_rate=2.5*1e-4, max_epsisode=2000, 
-                    result_path='./Result/', result_name='reinforce')
-    alg.reinforce()
+    alg = ActorCritic(env, size, number_of_state, number_of_action,
+                  critic_learning_rate=5*1e-5,
+                result_path='./Result/', result_name='actor_critic')
+    alg.actor_critic()

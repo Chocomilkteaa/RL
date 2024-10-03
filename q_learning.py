@@ -86,7 +86,7 @@ class QLearning:
 
         print(f'Reward Mean: {np.mean(trajectory_rewards)}, Std: {np.std(trajectory_rewards)}')
         
-        state, info = self.env.reset(seed=np.argmax(trajectory_rewards))
+        state, info = self.env.reset(seed=np.argmax(trajectory_rewards).item())
 
         writer = cv2.VideoWriter(os.path.join(self.result_path, f'{self.result_name}.avi'),cv2.VideoWriter_fourcc(*'DIVX'), self.frame_rate, self.size)
 
