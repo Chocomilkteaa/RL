@@ -82,8 +82,12 @@ class Reinforce(object):
         loss.backward()
         self.optimizer.step()
 
+    def getActionAndProb(self, state):
+        return self.actor_net.getActionAndProb(state)
+    
     def getAction(self, state):
-        return self.policy_net.getActionAndProb(state)
+        action, log_prob = self.actor_net.getActionAndProb(state)
+        return action
 
     def train(self):
         average_trajectory_reward = deque(maxlen=100)
@@ -95,7 +99,7 @@ class Reinforce(object):
             log_probs = []
 
             while True:
-                action, log_prob = self.getAction(state)
+                action, log_prob = self.getActionAndProb(state)
 
                 log_probs.append(log_prob)
 
@@ -126,7 +130,7 @@ class Reinforce(object):
             trajectory_length = 0
 
             while True:
-                action, _ = self.getAction(state)
+                action = self.getAction(state)
                 next_state, reward, terminated, truncated, info = self.env.step(action)
 
                 trajectory_reward += reward
@@ -164,6 +168,12 @@ class Reinforce(object):
 
         self.test()
 
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+
 def getEnvInfo(env):
     observation, info = env.reset()
     frame = env.render()
@@ -184,9 +194,7 @@ def getEnvInfo(env):
     return size, number_of_state, number_of_action
 
 if __name__ == '__main__':
-    torch.manual_seed(0)
-    np.random.seed(0)
-    random.seed(0)
+    set_seed(0)
 
     env = gym.make("CartPole-v1", render_mode='rgb_array')
     

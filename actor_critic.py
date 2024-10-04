@@ -89,7 +89,7 @@ class ActorCritic(object):
         value = self.critic_net.forward(transition.state)
         next_value = self.critic_net.forward(transition.next_state)
 
-        advantage = transition.reward + 0.99 * next_value - value
+        advantage = transition.reward + self.discount_rate * next_value - value
 
         actor_loss = -transition.log_prob * advantage.detach()
         critic_loss = torch.square(advantage)
@@ -102,8 +102,12 @@ class ActorCritic(object):
         critic_loss.backward()
         self.critic_optimizer.step()
 
-    def getAction(self, state):
+    def getActionAndProb(self, state):
         return self.actor_net.getActionAndProb(state)
+    
+    def getAction(self, state):
+        action, log_prob = self.actor_net.getActionAndProb(state)
+        return action
 
     def train(self):
         average_trajectory_reward = deque(maxlen=100)
@@ -114,7 +118,7 @@ class ActorCritic(object):
             rewards = 0
 
             while True:
-                action, log_prob = self.getAction(state)
+                action, log_prob = self.getActionAndProb(state)
 
                 next_state, reward, terminated, truncated, info = env.step(action)
 
@@ -145,7 +149,7 @@ class ActorCritic(object):
             trajectory_length = 0
 
             while True:
-                action, _ = self.getAction(state)
+                action = self.getAction(state)
                 next_state, reward, terminated, truncated, info = self.env.step(action)
 
                 trajectory_reward += reward
@@ -183,6 +187,11 @@ class ActorCritic(object):
 
         self.test()        
 
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
 
 def getEnvInfo(env):
     observation, info = env.reset()
@@ -204,15 +213,13 @@ def getEnvInfo(env):
     return size, number_of_state, number_of_action
 
 if __name__ == '__main__':
-    torch.manual_seed(0)
-    np.random.seed(0)
-    random.seed(0)
+    set_seed(0)
 
     env = gym.make("CartPole-v1", render_mode='rgb_array')
     
     size, number_of_state, number_of_action = getEnvInfo(env)
 
     alg = ActorCritic(env, size, number_of_state, number_of_action,
-                  critic_learning_rate=5*1e-5,
+                max_epsisode=1500, critic_learning_rate=2.5*1e-5,
                 result_path='./Result/', result_name='actor_critic')
     alg.actor_critic()
