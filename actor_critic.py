@@ -106,7 +106,8 @@ class ActorCritic(object):
         return self.actor_net.getActionAndProb(state)
     
     def getAction(self, state):
-        action, log_prob = self.actor_net.getActionAndProb(state)
+        with torch.no_grad():
+            action, log_prob = self.actor_net.getActionAndProb(state)
         return action
 
     def train(self):
