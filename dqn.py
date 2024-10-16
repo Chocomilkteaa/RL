@@ -4,6 +4,7 @@ import cv2
 from collections import namedtuple, deque
 import random
 import numpy as np
+
 import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
 
@@ -49,7 +50,7 @@ class Model(torch.nn.Module):
 class DQN(object):
     def __init__(self, env, size, number_of_state, number_of_action, 
                 batch_size=128, hidden_size=128, memory_size=10000,
-                max_epsisode=1000, explore_rate=0.99, learning_rate=1e-4, update_rate=0.005,  discount_rate=0.99,
+                max_epsisode=1000, explore_rate=0.99, explore_rate_decay=0.999, learning_rate=1e-4, update_rate=0.005,  discount_rate=0.99,
                 test_iter=10, result_path='./Result', result_name='video', frame_rate=30):
         self.env = env
         self.size = size
@@ -60,6 +61,7 @@ class DQN(object):
 
         self.max_epsisode = max_epsisode
         self.explore_rate = explore_rate
+        self.explore_rate_decay = explore_rate_decay
         self.learning_rate = learning_rate
         self.update_rate = update_rate
         self.discount_rate = discount_rate
@@ -85,6 +87,25 @@ class DQN(object):
 
         self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
         self.criterion = torch.nn.MSELoss()
+
+    def updateExploreRate(self):
+        self.explore_rate *= self.explore_rate_decay
+
+    def getAction(self, state):
+        with torch.no_grad():
+            action = self.policy_net(torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)).max(1).indices.item()
+
+        return action
+    
+    def getActionRandom(self, state):
+        random_num = np.random.uniform(0,1)
+
+        if random_num > self.explore_rate:
+            action = self.getAction(state)
+        else:
+            action = self.env.action_space.sample()
+
+        return action
 
     def sampleTransition(self):
         transitions = self.memory.sample(self.batch_size)
@@ -120,7 +141,7 @@ class DQN(object):
 
         expected_state_action_values = ((next_state_values * self.discount_rate) + reward_batch).unsqueeze(1)
 
-        loss = self.criterion(state_action_values, expected_state_action_values)
+        loss = self.criterion(state_action_values, expected_state_action_values.detach())
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -128,26 +149,16 @@ class DQN(object):
 
         self.updateTarget()
 
-    def getAction(self, state):
-        with torch.no_grad():
-            action = self.policy_net(torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)).max(1).indices.item()
-        return action
-
     def train(self):
         for episode in range(self.max_epsisode):
             state, info = env.reset(seed = episode)
 
-            self.explore_rate *= 0.999
+            self.updateExploreRate()
 
             rewards = 0
 
             while True:
-                random_num = np.random.uniform(0,1)
-
-                if random_num > self.explore_rate:
-                    action = self.getAction(state)
-                else:
-                    action = env.action_space.sample()
+                action = self.getActionRandom(state)
 
                 next_state, reward, terminated, truncated, info = env.step(action)
 

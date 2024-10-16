@@ -1,8 +1,7 @@
 import os
 import cv2
 
-from collections import namedtuple, deque
-import random
+from collections import deque
 import numpy as np
 import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
@@ -67,26 +66,33 @@ class Reinforce(object):
 
         self.eps = np.finfo(np.float32).eps.item()
 
-    def optimizePolicy(self, params):
+    def getActionAndProb(self, state):
+        return self.actor_net.getActionAndProb(state)
+
+    def getReturns(self, rewards):
         R = 0
         returns = deque()
-        for r in reversed(params['rewards']):
+        for r in reversed(rewards):
             R = r + R * self.discount_rate
             returns.appendleft(R)
         returns = torch.tensor(returns, dtype=torch.float32, device=self.device)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
 
-        loss = torch.cat([-a * b for a, b in zip(params['log_probs'], returns)]).sum()
+        return returns
+
+    def optimizePolicy(self, params):
+        returns = self.getReturns(params['rewards'])
+
+        loss = torch.cat([-a * b for a, b in zip(params['log_probs'], returns.detach())]).sum()
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-
-    def getActionAndProb(self, state):
-        return self.actor_net.getActionAndProb(state)
     
     def getAction(self, state):
-        action, log_prob = self.actor_net.getActionAndProb(state)
+        with torch.no_grad():
+            action, log_prob = self.actor_net.getActionAndProb(state)
+        
         return action
 
     def train(self):

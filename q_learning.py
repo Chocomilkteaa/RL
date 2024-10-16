@@ -8,7 +8,7 @@ from gymnasium.spaces import Discrete, Box
 class QLearning:
     def __init__(self, env, size, number_of_state, number_of_action,
                  max_iter=10**4, tol=10**-3, 
-                 explore_rate=0.99, learning_rate=0.5, discount_rate=0.99, 
+                 explore_rate=0.99, explore_rate_decay=0.9, learning_rate=0.5, discount_rate=0.99, 
                  test_iter=10, result_path='./', result_name='video', frame_rate=30):
         self.env = env
         self.size = size
@@ -21,6 +21,8 @@ class QLearning:
         self.tol = tol
 
         self.explore_rate = explore_rate
+        self.explore_rate_decay = explore_rate_decay
+
         self.learning_rate = learning_rate
         self.discount_rate = discount_rate
 
@@ -34,27 +36,38 @@ class QLearning:
 
         self.frame_rate = frame_rate
 
+    def updateExploreRate(self):
+        self.explore_rate *= self.explore_rate_decay
+
     def getAction(self, state):
         return np.argmax(self.q_table[state])
+    
+    def getActionRandom(self, state):
+        random_num = np.random.uniform(0,1)
+
+        if random_num > self.explore_rate:
+            action = self.getAction(state)
+        else:
+            action = self.env.action_space.sample()
+
+        return action
+    
+    def updateQTable(self, state, action, reward, next_state):
+        self.q_table[state, action] = self.q_table[state, action] + \
+                    self.learning_rate * (reward + self.discount_rate * np.max(self.q_table[next_state, :]) - self.q_table[state, action])
 
     def train(self):
         for i in range(self.max_iter):
-            state, info = self.env.reset()
+            state, info = self.env.reset(seed=i)
 
-            self.explore_rate *= 0.9
+            self.updateExploreRate()
 
             while True:
-                random_num = np.random.uniform(0,1)
-
-                if random_num > self.explore_rate:
-                    action = self.getAction(state)
-                else:
-                    action = self.env.action_space.sample()
+                action = self.getActionRandom(state)
 
                 next_state, reward, terminated, truncated, info = self.env.step(action)
 
-                self.q_table[state, action] = self.q_table[state, action] + \
-                    self.learning_rate * (reward + self.discount_rate * np.max(self.q_table[next_state, :]) - self.q_table[state, action])
+                self.updateQTable(state, action, reward, next_state)
                 
                 if terminated or truncated:
                     break

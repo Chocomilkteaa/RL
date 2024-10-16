@@ -53,6 +53,15 @@ class PolicyAndValueIteration:
 
         self.policies = np.argmax(self.rewards + np.matmul(self.transitions, self.discount_rate * self.values), axis=1)
 
+    def optimizePolicyIteratively(self):
+        for i in range(self.test_iter):
+            policies_old = self.policies.copy()
+
+            self.optimizePolicy()
+
+            if np.all(np.equal(self.policies, policies_old)):
+                break
+
     def getAction(self, state):
         return self.policies[state]
 
@@ -107,13 +116,7 @@ class PolicyAndValueIteration:
     def policy_iteration(self):
         self.getRewardsAndTransitions()
 
-        for i in range(self.test_iter):
-            policies_old = self.policies.copy()
-
-            self.optimizePolicy()
-
-            if np.all(np.equal(self.policies, policies_old)):
-                break
+        self.optimizePolicyIteratively()
 
         self.test()
 

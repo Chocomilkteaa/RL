@@ -2,8 +2,8 @@ import os
 import cv2
 
 from collections import deque
-import math
 import numpy as np
+
 import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
 

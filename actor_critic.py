@@ -2,8 +2,8 @@ import os
 import cv2
 
 from collections import namedtuple, deque
-import random
 import numpy as np
+
 import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
 
@@ -85,6 +85,9 @@ class ActorCritic(object):
 
         self.eps = np.finfo(np.float32).eps.item()
 
+    def getActionAndProb(self, state):
+        return self.actor_net.getActionAndProb(state)
+
     def optimizePolicy(self, transition):
         value = self.critic_net.forward(transition.state)
         next_value = self.critic_net.forward(transition.next_state)
@@ -101,13 +104,11 @@ class ActorCritic(object):
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
-
-    def getActionAndProb(self, state):
-        return self.actor_net.getActionAndProb(state)
     
     def getAction(self, state):
         with torch.no_grad():
             action, log_prob = self.actor_net.getActionAndProb(state)
+
         return action
 
     def train(self):
