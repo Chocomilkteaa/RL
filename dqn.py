@@ -9,6 +9,7 @@ import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'reward', 'next_state', 'n_done'))
@@ -51,7 +52,7 @@ class DQN(object):
     def __init__(self, env, size, number_of_state, number_of_action, 
                 batch_size=128, hidden_size=128, memory_size=10000,
                 max_epsisode=1000, explore_rate=0.99, explore_rate_decay=0.999, learning_rate=1e-4, update_rate=0.005,  discount_rate=0.99,
-                test_iter=10, result_path='./Result', result_name='video', frame_rate=30):
+                target_score=500, test_iter=10, log_path='./Log', result_path='./Result', result_name='video', frame_rate=30):
         self.env = env
         self.size = size
         self.number_of_state = number_of_state
@@ -66,7 +67,14 @@ class DQN(object):
         self.update_rate = update_rate
         self.discount_rate = discount_rate
 
+        self.target_score = target_score
+
         self.test_iter = test_iter
+
+        if not os.path.exists(log_path):
+            os.makedirs(log_path)
+        self.writer = SummaryWriter(log_path)
+        self.step = 0
 
         self.result_path = result_path
         if not os.path.exists(self.result_path):
@@ -142,6 +150,9 @@ class DQN(object):
         expected_state_action_values = ((next_state_values * self.discount_rate) + reward_batch).unsqueeze(1)
 
         loss = self.criterion(state_action_values, expected_state_action_values.detach())
+        self.writer.add_scalar('loss', loss.item(), global_step=self.step)
+
+        self.step += 1
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -150,6 +161,8 @@ class DQN(object):
         self.updateTarget()
 
     def train(self):
+        average_trajectory_reward = deque(maxlen=100)
+
         for episode in range(self.max_epsisode):
             state, info = env.reset(seed = episode)
 
@@ -170,9 +183,16 @@ class DQN(object):
 
                 if terminated or truncated:
                     print(f'Episode: {episode} ends with reward {rewards}')
+                    average_trajectory_reward.append(rewards)
                     break
 
                 state = next_state
+
+            if np.mean(average_trajectory_reward) >= self.target_score:
+                print(f'solved with {episode} epochs')
+                break
+
+        self.writer.close()
 
     def test(self):
         trajectory_rewards = []
@@ -253,5 +273,5 @@ if __name__ == '__main__':
     
     size, number_of_state, number_of_action = getEnvInfo(env)
 
-    alg = DQN(env, size, number_of_state, number_of_action, batch_size=64,  result_path='./Result/', result_name='dqn')
+    alg = DQN(env, size, number_of_state, number_of_action, batch_size=64,  result_name='dqn')
     alg.dqn()

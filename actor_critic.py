@@ -8,6 +8,7 @@ import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 Transition = namedtuple('Transition',
                         ['state', 'log_prob', 'reward', 'next_state'])
@@ -52,7 +53,7 @@ class Critic(torch.nn.Module):
 class ActorCritic(object):
     def __init__(self, env, size, number_of_state, number_of_action, 
                 hidden_size=128, max_epsisode=1000, actor_learning_rate=1e-4, critic_learning_rate=1e-4, discount_rate=0.99,
-                target_score=500, test_iter=10, result_path='./Result', result_name='video', frame_rate=30):
+                target_score=500, test_iter=10, log_path='./Log', result_path='./Result', result_name='video', frame_rate=30):
         self.env = env
         self.size = size
         self.number_of_state = number_of_state
@@ -66,6 +67,11 @@ class ActorCritic(object):
         self.target_score = target_score
 
         self.test_iter = test_iter
+
+        if not os.path.exists(log_path):
+            os.makedirs(log_path)
+        self.writer = SummaryWriter(log_path)
+        self.step = 0
 
         self.result_path = result_path
         if not os.path.exists(self.result_path):
@@ -95,7 +101,11 @@ class ActorCritic(object):
         advantage = transition.reward + self.discount_rate * next_value - value
 
         actor_loss = -transition.log_prob * advantage.detach()
+        self.writer.add_scalar('actor_loss', actor_loss.item(), global_step=self.step)
         critic_loss = torch.square(advantage)
+        self.writer.add_scalar('critic_loss', critic_loss.item(), global_step=self.step)
+
+        self.step += 1
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -142,6 +152,8 @@ class ActorCritic(object):
             if np.mean(average_trajectory_reward) >= self.target_score:
                 print(f'solved with {episode} epochs')
                 break
+
+        self.writer.close()
 
     def test(self):
         trajectory_rewards = []

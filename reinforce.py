@@ -3,10 +3,12 @@ import cv2
 
 from collections import deque
 import numpy as np
+
 import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 class Policy(torch.nn.Module):
     def __init__(self, number_of_state, number_of_action, hidden_size, device):
@@ -35,7 +37,7 @@ class Policy(torch.nn.Module):
 class Reinforce(object):
     def __init__(self, env, size, number_of_state, number_of_action, 
                 hidden_size=128, max_epsisode=1000, learning_rate=1e-4, discount_rate=0.99,
-                target_score=500, test_iter=10, result_path='./Result', result_name='video', frame_rate=30):
+                target_score=500, test_iter=10, log_path='./Log', result_path='./Result', result_name='video', frame_rate=30):
         
         self.env = env
         self.size = size
@@ -49,6 +51,11 @@ class Reinforce(object):
         self.target_score = target_score
 
         self.test_iter = test_iter
+
+        if not os.path.exists(log_path):
+            os.makedirs(log_path)
+        self.writer = SummaryWriter(log_path)
+        self.step = 0
 
         self.result_path = result_path
         if not os.path.exists(self.result_path):
@@ -84,6 +91,9 @@ class Reinforce(object):
         returns = self.getReturns(params['rewards'])
 
         loss = torch.cat([-a * b for a, b in zip(params['log_probs'], returns.detach())]).sum()
+        self.writer.add_scalar('loss', loss.item(), global_step=self.step)
+
+        self.step += 1
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -127,6 +137,8 @@ class Reinforce(object):
             params = {'rewards': rewards, 'log_probs': log_probs}
 
             self.optimizePolicy(params)
+
+        self.writer.close()
 
     def test(self):
         trajectory_rewards = []

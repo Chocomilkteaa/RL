@@ -8,6 +8,7 @@ import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 class ReplayMemory(object):
     def __init__(self, memory_size, number_of_state, discount_rate, device):
@@ -113,8 +114,8 @@ class Critic(torch.nn.Module):
 class PPO(object):
     def __init__(self, env, size, number_of_state, number_of_action,
                 batch_size=128, hidden_size=128, memory_size=10000,
-                max_epsisode=1000, actor_learning_rate=1e-4, critic_learning_rate=1e-4, discount_rate=0.99,
-                target_score=500, test_iter=10, result_path='./Result', result_name='video', frame_rate=30):
+                max_epsisode=1000, actor_learning_rate=1e-4, critic_learning_rate=1e-4, discount_rate=0.99, clamp_ratio=0.2,
+                target_score=500, test_iter=10, log_path='./Log', result_path='./Result', result_name='video', frame_rate=30):
         self.env = env
         self.size = size
         self.number_of_state = number_of_state
@@ -126,10 +127,16 @@ class PPO(object):
         self.actor_learning_rate = actor_learning_rate
         self.critic_learning_rate = critic_learning_rate
         self.discount_rate = discount_rate
+        self.clamp_ratio = clamp_ratio
 
         self.target_score = target_score
 
         self.test_iter = test_iter
+
+        if not os.path.exists(log_path):
+            os.makedirs(log_path)
+        self.writer = SummaryWriter(log_path)
+        self.step = 0
 
         self.result_path = result_path
         if not os.path.exists(self.result_path):
@@ -171,11 +178,15 @@ class PPO(object):
             log_probs = self.actor_net.getProb(states, actions)
 
             ratios = torch.exp(log_probs-log_probs_old.detach())
-            actor_loss = -torch.min(ratios * advantages.detach(), torch.clamp(ratios, 1 - 0.2, 1 + 0.2) * advantages.detach()).mean()
+            actor_loss = -torch.min(ratios * advantages.detach(), torch.clamp(ratios, 1 - self.clamp_ratio, 1 + self.clamp_ratio) * advantages.detach()).mean()
+            self.writer.add_scalar('actor_loss', actor_loss.item(), global_step=self.step)
 
             values = self.critic_net.forward(states)
 
             critic_loss = self.criterion(values.squeeze(), returns.detach())
+            self.writer.add_scalar('critic_loss', critic_loss.item(), global_step=self.step)
+
+            self.step += 1
 
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
@@ -251,6 +262,8 @@ class PPO(object):
                 break
 
             self.optimizePolicy()
+
+        self.writer.close()
 
     def test(self):
         trajectory_rewards = []
